@@ -1,24 +1,22 @@
-var define, requireModule, require, requirejs;
-(function () {
-  var registry = {}, seen = {};
+(function (root) {
+  var seen = {}, _Pending = {};
 
   var depsLoadPromise = {};
 
-  define = function(name, deps, callback) {
-    registry[name] = {deps: deps, callback: callback};
+  var define = function(name, deps, callback) {
     depsLoadPromise[name] = new Promise(function(modResolve, modReject) {
       var promiseMap = deps.map(function(dep){
-        var dep_name = getModPath(dep, name);
-        if(seen[dep_name]){
-          if(seen[dep_name] === 'pending'){
-            throw Error('Error: repeat dependenicy!');
+        var depName = getModPath(dep, name);
+        if(seen[depName]){
+          if(seen[depName] === _Pending){
+            throw Error('repeat dependenicy!');
           }
-          return Promise.resolve(seen[dep_name]);
+          return Promise.resolve(seen[depName]);
         }
-        seen[dep_name] = 'pending';
-        return importJsPromise(dep_name).then(function(){
-          return depsLoadPromise[dep_name] || Promise.resolve('extend');
-        })
+        seen[depName] = _Pending;
+        return importJsPromise(depName).then(function(){
+          return depsLoadPromise[depName] || Promise.reject('can not module ' + depName);
+        });
       });
       return Promise.all(promiseMap).then(function(results){
         seen[name] = callback.apply(null, results);
@@ -26,7 +24,7 @@ var define, requireModule, require, requirejs;
         console.log('[Load Module]: ' + name);
       }, modReject);
     }).catch(function(e){
-      console.error(e)
+      console.error('[Error]: ' + e);
     });
 
   };
@@ -66,4 +64,6 @@ var define, requireModule, require, requirejs;
       return presentPath.join('/')
     }
 
-}());
+    root.define = root.define || define;
+
+}(window));
