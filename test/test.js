@@ -1,1 +1,3 @@
-console.log()
+define('testScript', [], function () {
+  return 'testScript';
+})

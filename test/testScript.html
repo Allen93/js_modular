@@ -7,10 +7,14 @@
 </head>
 <body>
   <script>
-    define('main', ['app/test1'], function (test) {
-      console.log(test)
-      console.log('finish')
+    modConfig({
+      root: 'test/',
+      testScript: 'test.jss'
     });
+    define('main', ['run:app/test1'], function (test) {
+      console.log(test)
+      console.log('finish');
+    }).run();
   </script>
 </body>
 </html>

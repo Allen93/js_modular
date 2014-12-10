@@ -1,69 +1,139 @@
 (function (root) {
-  var seen = {}, _Pending = {};
-
+  var seen = {}, _Pending = {}, registry = {};
+  var customPath = {}, rootPath = location.pathname;
   var depsLoadPromise = {};
 
   var define = function(name, deps, callback) {
     depsLoadPromise[name] = new Promise(function(modResolve, modReject) {
       var promiseMap = deps.map(function(dep){
+        var runNow = false;
+        /*判断该模块是否立即执行*/
+        if(dep.indexOf('run:') === 0){
+          dep = dep.slice(4);
+          runNow = true;
+        }
         var depName = getModPath(dep, name);
-        if(seen[depName]){
-          if(seen[depName] === _Pending){
+        if(registry[depName]){
+          if(registry[depName] === _Pending){
             throw Error('repeat dependenicy!');
           }
-          return Promise.resolve(seen[depName]);
+          return Promise.resolve(registry[depName]);
         }
-        seen[depName] = _Pending;
+        registry[depName] = _Pending;
         return importJsPromise(depName).then(function(){
-          return depsLoadPromise[depName] || Promise.reject('can not module ' + depName);
+        /*立即执行模块*/
+          if(runNow){
+            depsLoadPromise[depName].then(function(result){
+              seen[depName] = seen[depName] || require(depName);
+            });
+          }
+          return depsLoadPromise[depName] || Promise.reject('can not find module ' + depName);
         });
       });
       return Promise.all(promiseMap).then(function(results){
-        seen[name] = callback.apply(null, results);
-        modResolve(seen[name]);
+        registry[name] = {name: name, deps: results, callback: callback};
+        modResolve(registry[name]);
         console.log('[Load Module]: ' + name);
       }, modReject);
     }).catch(function(e){
       console.error('[Error]: ' + e);
+      throw Error('load module ' + name + ' faild: ')
     });
 
+    return {
+      run: function(){
+        depsLoadPromise[name].then(function(){
+          require(name);
+        }, function(e){
+          console.error('[Error]: ' + e);
+        });
+      }
+    }
   };
 
+  var defineConfig = function(options){
+    for(var key in options){
+      if(key !== 'root'){
+        customPath[key] = options[key];
+      }
+    }
+    var configRootPath = options.root || '';
+    rootPath = getModPath(configRootPath, rootPath);
+  }
+
+  function require(name){
+    if(!registry[name]){
+      return importJsPromise(name).then(function(){
+          return depsLoadPromise[name] || Promise.reject('can not find module ' + name);
+      }).then(function(){
+        return require(name);
+      }).catch(function(e){
+        throw Error('[Error]: can not find module ' + name);
+      });
+    }
+    if(seen[name]){
+      return seen[name];
+    }
+    var mod = registry[name],
+        deps = mod.deps,
+        callback = mod.callback,
+        depsResult = [],
+        depName;
+    for(var i in deps) {
+      depName = deps[i].name;
+      seen[depName] = seen[depName] || require(depName);
+      depsResult.push(seen[depName]);
+    }
+    return callback.apply(null, depsResult);
+  }
+
   function importJsPromise(modName) {
-    var basePath = location.pathname.split('/').slice(0, -1),
-        modPath = modName.split('/'),
+      if(customPath[modName]){
+        modName = customPath[modName];
+      }
+    var basePath = rootPath.split('/').slice(0, -1),
+        modPath = (modName).split('/'),
         filePath = basePath.concat(modPath).join('/');
     if(filePath.slice(-3) !== '.js') {
       filePath = filePath + '.js';
     }
+    return jsFileLoadPromise(filePath);
+  }
+
+  /*Load JS File in Browser*/
+  function jsFileLoadPromise(filePath){
     return new Promise(function(resolve, reject){
       var script = document.createElement('script')
       script.src = filePath;
       document.body.appendChild(script);
-      script.onload = resolve;
+      script.onload = function(){
+        resolve(script);
+      };
       script.onerror = function(){
         reject('Error: can not find file: ' + filePath);
       };
+    }).then(function(elem){
+      document.body.removeChild(elem);
     });
   }
 
-    function getModPath(depName, baseName) {
-      var presentPath = baseName ? baseName.split('/').slice(0, -1) : [],
-        depPaths = depName.split('/'),
-        i, length;
-      if(depName.charAt(0) !== '.') {return presentPath.concat(depPaths).join('/');}
-      for(i = 0, length = depPaths.length; i < length; i++) {
-        if(depPaths[i] === '.') {
-          continue;
-        } else if(depPaths[i] === '..') {
-          presentPath.pop();
-        } else {
-          presentPath.push(depPaths[i]);
-        }
+  function getModPath(depName, baseName) {
+    var presentPath = baseName ? baseName.split('/').slice(0, -1) : [],
+      depPaths = depName.split('/'),
+      i, length;
+    if(depName.charAt(0) !== '.') {return presentPath.concat(depPaths).join('/');}
+    for(i = 0, length = depPaths.length; i < length; i++) {
+      if(depPaths[i] === '.') {
+        continue;
+      } else if(depPaths[i] === '..') {
+        presentPath.pop();
+      } else {
+        presentPath.push(depPaths[i]);
       }
-      return presentPath.join('/')
     }
-
+    return presentPath.join('/')
+  }
     root.define = root.define || define;
+    root.defineConfig = root.defineConfig || defineConfig;
 
 }(window));
