@@ -1,54 +1,35 @@
 (function (root) {
-  var seen = {}, _Pending = {}, registry = {};
+  var seen = {}, _Pending = {}, registry = {}, startLoad = {};
   var customPath = {}, rootPath = location.pathname;
   var depsLoadPromise = {};
 
-  var define = function(name, deps, callback) {
-    depsLoadPromise[name] = new Promise(function(modResolve, modReject) {
-      var promiseMap = deps.map(function(dep){
-        var runNow = false;
-        /*判断该模块是否立即执行*/
-        if(dep.indexOf('run:') === 0){
-          dep = dep.slice(4);
-          runNow = true;
-        }
-        var depName = getModPath(dep, name);
-        if(registry[depName]){
-          if(registry[depName] === _Pending){
-            throw Error('repeat dependenicy!');
-          }
-          return Promise.resolve(registry[depName]);
-        }
-        registry[depName] = _Pending;
-        return importJsPromise(depName).then(function(){
-        /*立即执行模块*/
-          if(runNow){
-            depsLoadPromise[depName].then(function(result){
-              seen[depName] = seen[depName] || require(depName);
-            });
-          }
-          return depsLoadPromise[depName] || Promise.reject('can not find module ' + depName);
-        });
-      });
-      return Promise.all(promiseMap).then(function(results){
-        registry[name] = {name: name, deps: results, callback: callback};
-        modResolve(registry[name]);
-        console.log('[Load Module]: ' + name);
-      }, modReject);
-    }).catch(function(e){
-      console.error('[Error]: ' + e);
-      throw Error('load module ' + name + ' faild: ')
-    });
 
+  var define = function(name, deps, callback){
+    if(registry[name]) {
+      throw Error('module ' + name + ' has been defined!');
+    }
+    var depsPath = deps.map(function(dep){
+      return getModPath(dep, name);
+    });
+    registry[name] = {name: name, depsPath: depsPath, callback: callback};
+    if(startLoad[name]) {
+      loadModule(name);
+    }
     return {
       run: function(){
-        depsLoadPromise[name].then(function(){
-          require(name);
-        }, function(e){
-          console.error('[Error]: ' + e);
-        });
+        return require(name);
       }
     }
+  };
+
+  var require = function(name){
+    startLoad[name] = true;
+    loadModule(name);
+    return depsLoadPromise[name].then(function(){
+      return getModResult(name);
+    }, function(e){
+      console.error('[Error]: ' + e);
+    });
   };
 
   var defineConfig = function(options){
@@ -59,14 +40,14 @@
     }
     var configRootPath = options.root || '';
     rootPath = getModPath(configRootPath, rootPath);
-  }
+  };
 
-  function require(name){
+  function getModResult(name){
     if(!registry[name]){
       return importJsPromise(name).then(function(){
           return depsLoadPromise[name] || Promise.reject('can not find module ' + name);
       }).then(function(){
-        return require(name);
+        return getModResult(name);
       }).catch(function(e){
         throw Error('[Error]: can not find module ' + name);
       });
@@ -81,11 +62,41 @@
         depName;
     for(var i in deps) {
       depName = deps[i].name;
-      seen[depName] = seen[depName] || require(depName);
+      seen[depName] = seen[depName] || getModResult(depName);
       depsResult.push(seen[depName]);
     }
     return callback.apply(null, depsResult);
   }
+
+  function loadModule(name) {
+    if(!registry[name]) {
+      throw Error('module ' + name + ' not defined!');
+    }
+    depsPath = registry[name].depsPath || [];
+    registry[name].deps = _Pending;
+    depsLoadPromise[name] = new Promise(function(modResolve, modReject) {
+      var promiseMap = depsPath.map(function(depName){
+        if(registry[depName] && registry[depName].deps){
+          if(registry[depName].deps === _Pending){
+            throw Error('repeat dependenicy!');
+          }
+          return Promise.resolve(registry[depName]);
+        }
+        startLoad[depName] = true;
+        return importJsPromise(depName).then(function(){
+          return depsLoadPromise[depName] || Promise.reject('can not find module ' + depName);
+        });
+      });
+      return Promise.all(promiseMap).then(function(results){
+        registry[name].deps = results;
+        modResolve(registry[name]);
+        console.log('[Load Module]: ' + name);
+      }, modReject);
+    }).catch(function(e){
+      console.error('[Error]: ' + e);
+      throw Error('load module ' + name + ' faild: ')
+    });
+  };
 
   function importJsPromise(modName) {
       if(customPath[modName]){
@@ -135,5 +146,6 @@
   }
     root.define = root.define || define;
     root.defineConfig = root.defineConfig || defineConfig;
+    root.require = root.require || require;
 
 }(window));

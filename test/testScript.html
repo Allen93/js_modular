@@ -7,14 +7,16 @@
 </head>
 <body>
   <script>
-    modConfig({
-      root: 'test/',
+    defineConfig({
+      root: '/',
       testScript: 'test.jss'
     });
-    define('main', ['run:app/test1'], function (test) {
+    define('main', ['app/test1'], function (test) {
       console.log(test)
       console.log('finish');
+      return 'ssss';
     }).run();
+    // var a = require('main');
   </script>
 </body>
 </html>
